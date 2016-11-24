@@ -1,0 +1,88 @@
+---
+title: "Weight-lifting exercise Qualitative Prediction"
+author: "Emmet Murphy"
+date: "November 23, 2016"
+output: html_document
+references:
+- id: velloso2013
+  title: Qualitative Activity Recognition of Weight Lifting Exercises
+  author:
+    - family: Velloso
+      given: E.
+    - family: Bulling
+      given: A.
+  container-title: Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13)
+  URL: http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises#ixzz4Qu8t3jbV
+  publisher: ACM SIGCHI
+  issued: 
+    year: 2013
+---
+
+## Executive Summary
+
+A random forest classification model is fitted to data from @velloso2013. The model predicts how well a person performs a weight-lifting exercise, with 95% accuracy. 
+
+## Data preparation
+
+The size of the data and computational limitations drove the design of data partitions between train and validation. We originally split 70/30, but a random forest model required hours to train on available hardware. Therefore we set aside 90% of the data for validation and used the remaining 1,964 samples for training. 
+
+```{r,cache=TRUE}
+trainMaster <- read.csv('pml-training.csv')
+set.seed(199)
+library(caret)
+inTrain <- createDataPartition(y=trainMaster$classe,
+                               p=0.1, list=FALSE)
+train <- trainMaster[inTrain,]
+validation <- trainMaster[-inTrain,]
+test <- read.csv('pml-testing.csv')
+
+```
+
+## Model selection
+
+Data exploration techniques such as pairwise plots proved not very helpful with this data, given the large number of variables and difficulty in interpreting their influence. Therefore for our model selection we relied heavily on the original paper (@vello2013), which used random forests with bagging. With only random forest using default parameters, the model achieves 95% accuracy. Good enough for our purpose.  
+
+## Data preparation
+
+The data has variables that are not useful as predictors, including:
+- The first 7 columns that describe the data, such as name and timestamps
+- Variables that have NA whenever `new_window` is "no" (98% of the records)
+- Variables for kurtosis, skewness, amplitude, max and min. They are factor variables with many levels, including blanks and "#DIV/0!"  
+
+Those variables are removed, leaving 52 predictors (down from 159).
+
+```{r}
+new_window_count <- length(train[train$new_window=='no',1])
+trainFeatures <- subset(train, select='classe')
+nonPredictors <- c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+removedFeatures <- subset(train, select=nonPredictors)
+for (col in colnames(train)) {
+    if (col %in% nonPredictors) next
+    if (regexpr('^kurtosis_|^skewness_|^amplitude_|^max_|^min_', col)[1] == -1 && sum(is.na(train[[col]])) != new_window_count) {
+        trainFeatures[[col]] = train[[col]]
+    }
+    else {
+        removedFeatures[[col]] = train[[col]]
+    }
+}
+validationFeatures <- subset(validation, select=colnames(trainFeatures))
+```
+
+## Fitting the model
+
+After training the random forest model we print the variable importance, for reference.
+
+```{r,cache=TRUE}
+fitRf <- train(classe ~ .,data=trainFeatures,method="rf",prox=TRUE)
+#print(fitRf)
+varImp(fitRf)
+```
+
+Finally, the prediction and confusion matrix for the validation data suggests we can expect about 95% accuracy for out-of-sample data.
+
+```{r,cache=TRUE}
+#trainPred <- predict.train(fitRf, trainFeatures)
+#confusionMatrix(trainPred, trainFeatures$classe)
+validationPred <- predict.train(fitRf, validationFeatures)
+confusionMatrix(validationPred, validationFeatures$classe)
+```
